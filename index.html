@@ -168,6 +168,66 @@
       gap: 0.55rem;
     }
 
+    .section-title {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .preset-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .preset-btn {
+      background: rgba(39, 138, 255, 0.1);
+      color: var(--primary-dark);
+      font-size: 0.82rem;
+      padding: 0.5rem 0.74rem;
+    }
+
+    .preset-btn:hover {
+      transform: translateY(-1px);
+      background: rgba(39, 138, 255, 0.18);
+    }
+
+    .history {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.42rem;
+      max-height: 156px;
+      overflow: auto;
+    }
+
+    .history-item {
+      border: 1px solid rgba(11, 27, 47, 0.1);
+      border-radius: 12px;
+      padding: 0.5rem 0.6rem;
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--ink);
+      font-size: 0.82rem;
+      cursor: pointer;
+      text-align: left;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .history-item:hover {
+      border-color: rgba(39, 138, 255, 0.4);
+      background: rgba(255, 255, 255, 0.96);
+    }
+
+    .history-empty {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.83rem;
+    }
+
     button {
       border: 0;
       border-radius: 999px;
@@ -274,8 +334,21 @@
 
       <div class="controls">
         <button id="generateBtn" class="btn-primary" type="button">Generate 3D</button>
+        <button id="apiGenerateBtn" class="btn-sub" type="button">AIで生成(API)</button>
         <button id="randomBtn" class="btn-sub" type="button">ランダム生成</button>
+        <button id="exportGlbBtn" class="btn-sub" type="button">GLBエクスポート</button>
       </div>
+
+      <section>
+        <p class="section-title">プリセット</p>
+        <div id="presetList" class="preset-list"></div>
+      </section>
+
+      <section>
+        <p class="section-title">プロンプト履歴</p>
+        <ul id="historyList" class="history"></ul>
+        <p id="historyEmpty" class="history-empty">まだ履歴がありません。</p>
+      </section>
 
       <p id="status" class="status">待機中: プロンプトを入力して「Generate 3D」を押してください。</p>
     </section>
@@ -289,13 +362,33 @@
   <script type="module">
     import * as THREE from "https://unpkg.com/three@0.165.0/build/three.module.js";
     import { OrbitControls } from "https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js";
+    import { GLTFLoader } from "https://unpkg.com/three@0.165.0/examples/jsm/loaders/GLTFLoader.js";
+    import { GLTFExporter } from "https://unpkg.com/three@0.165.0/examples/jsm/exporters/GLTFExporter.js";
 
     const promptEl = document.getElementById("prompt");
     const statusEl = document.getElementById("status");
     const labelEl = document.getElementById("sceneLabel");
     const generateBtn = document.getElementById("generateBtn");
+    const apiGenerateBtn = document.getElementById("apiGenerateBtn");
     const randomBtn = document.getElementById("randomBtn");
+    const exportGlbBtn = document.getElementById("exportGlbBtn");
+    const presetListEl = document.getElementById("presetList");
+    const historyListEl = document.getElementById("historyList");
+    const historyEmptyEl = document.getElementById("historyEmpty");
     const canvas = document.getElementById("scene");
+
+    const PRESET_PROMPTS = [
+      "青い金属の球体を作って、少し大きめ",
+      "赤い立方体を作って",
+      "緑の円柱で少し大きい",
+      "黄色のトーラスを小さめで",
+      "白いマットなコーン",
+    ];
+    const USER_KEY = "text_to_3d_user_id_v1";
+    const MAX_POLL_ATTEMPTS = 25;
+    const POLL_INTERVAL_MS = 1200;
+
+    const userId = getOrCreateUserId();
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0xd7e9ff, 7, 16);
@@ -313,6 +406,8 @@
     controls.minDistance = 2;
     controls.maxDistance = 8;
 
+    const gltfLoader = new GLTFLoader();
+
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9db8d3, 1.08);
     scene.add(hemiLight);
 
@@ -328,7 +423,131 @@
     floor.position.y = -1.15;
     scene.add(floor);
 
-    let currentMesh = null;
+    let currentObject = null;
+
+    function getOrCreateUserId() {
+      const existing = localStorage.getItem(USER_KEY);
+      if (existing) return existing;
+
+      const generated = window.crypto && "randomUUID" in window.crypto
+        ? window.crypto.randomUUID()
+        : `guest_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem(USER_KEY, generated);
+      return generated;
+    }
+
+    function normalizeApiParams(apiParams = {}) {
+      return {
+        shape: apiParams.shape || "sphere",
+        color: typeof apiParams.color === "number" ? apiParams.color : 0x278aff,
+        colorName: apiParams.colorName || "blue",
+        scale: typeof apiParams.scale === "number" ? apiParams.scale : 1,
+        scaleName: apiParams.scaleName || "medium",
+        roughness: typeof apiParams.roughness === "number" ? apiParams.roughness : 0.35,
+        metalness: typeof apiParams.metalness === "number" ? apiParams.metalness : 0.35,
+      };
+    }
+
+    function clearCurrentObject() {
+      if (!currentObject) return;
+
+      scene.remove(currentObject);
+      currentObject.traverse((child) => {
+        if (!child.isMesh) return;
+        child.geometry && child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m && m.dispose && m.dispose());
+        } else if (child.material && child.material.dispose) {
+          child.material.dispose();
+        }
+      });
+      currentObject = null;
+    }
+
+    function renderHistory(historyItems = []) {
+      historyListEl.innerHTML = "";
+      historyEmptyEl.style.display = historyItems.length ? "none" : "block";
+
+      historyItems.forEach((item) => {
+        const promptText = typeof item === "string" ? item : (item.prompt || "");
+        if (!promptText) return;
+
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.className = "history-item";
+        btn.type = "button";
+        btn.textContent = promptText;
+        btn.addEventListener("click", async () => {
+          promptEl.value = promptText;
+          if (item.glbUrl) {
+            await loadGeneratedGlb(item.glbUrl, parsePrompt(promptText));
+            statusEl.textContent = "履歴からGLBを読み込みました。";
+            return;
+          }
+          generateFromPrompt(promptText, { saveHistory: false, mode: "history" });
+        });
+        li.appendChild(btn);
+        historyListEl.appendChild(li);
+      });
+    }
+
+    async function fetchHistoryFromServer() {
+      const response = await fetch(`./api/history.php?userId=${encodeURIComponent(userId)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (!payload.success) throw new Error(payload.message || "履歴取得に失敗しました。");
+      return Array.isArray(payload.items) ? payload.items : [];
+    }
+
+    async function refreshHistory() {
+      try {
+        const items = await fetchHistoryFromServer();
+        renderHistory(items);
+      } catch (error) {
+        historyEmptyEl.style.display = "block";
+        historyEmptyEl.textContent = `履歴取得エラー: ${error}`;
+      }
+    }
+
+    async function saveHistoryToServer({ prompt, mode, jobId = "", glbUrl = "" }) {
+      const response = await fetch("./api/history.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, prompt, mode, jobId, glbUrl }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (!payload.success) throw new Error(payload.message || "履歴保存に失敗しました。");
+      renderHistory(Array.isArray(payload.items) ? payload.items : []);
+    }
+
+    function renderPresets() {
+      presetListEl.innerHTML = "";
+      PRESET_PROMPTS.forEach((preset) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "preset-btn";
+        button.textContent = preset;
+        button.addEventListener("click", () => {
+          promptEl.value = preset;
+          generateFromPrompt(preset, { mode: "preset" });
+        });
+        presetListEl.appendChild(button);
+      });
+    }
+
+    function fitObjectToView(object3d) {
+      const box = new THREE.Box3().setFromObject(object3d);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+      const target = 2.1;
+      const scale = target / maxDim;
+
+      object3d.scale.multiplyScalar(scale);
+      object3d.position.sub(center.multiplyScalar(scale));
+      object3d.position.y -= 0.1;
+    }
 
     function resize() {
       const rect = canvas.getBoundingClientRect();
@@ -386,14 +605,20 @@
       return new THREE.SphereGeometry(1, 64, 64);
     }
 
-    function generateFromPrompt(promptText) {
+    function generateFromPrompt(promptText, options = {}) {
+      const { saveHistory = true, mode = "local" } = options;
       const parsed = parsePrompt(promptText);
-
-      if (currentMesh) {
-        scene.remove(currentMesh);
-        currentMesh.geometry.dispose();
-        currentMesh.material.dispose();
+      generateFromParams(parsed);
+      statusEl.textContent = `生成完了: ${parsed.shape} を ${parsed.colorName} で作成しました。`;
+      if (saveHistory) {
+        saveHistoryToServer({ prompt: promptText, mode }).catch((error) => {
+          statusEl.textContent = `履歴保存エラー: ${error}`;
+        });
       }
+    }
+
+    function generateFromParams(parsed) {
+      clearCurrentObject();
 
       const geometry = buildGeometry(parsed.shape);
       const material = new THREE.MeshStandardMaterial({
@@ -402,25 +627,168 @@
         metalness: parsed.metalness,
       });
 
-      currentMesh = new THREE.Mesh(geometry, material);
-      currentMesh.scale.setScalar(parsed.scale);
-      currentMesh.position.y = -0.05;
-      scene.add(currentMesh);
+      currentObject = new THREE.Mesh(geometry, material);
+      currentObject.scale.setScalar(parsed.scale);
+      currentObject.position.y = -0.05;
+      scene.add(currentObject);
 
       labelEl.textContent = `shape: ${parsed.shape} | color: ${parsed.colorName} | scale: ${parsed.scaleName}`;
-      statusEl.textContent = `生成完了: ${parsed.shape} を ${parsed.colorName} で作成しました。`;
+    }
+
+    async function loadGeneratedGlb(glbUrl, fallbackParsed = null) {
+      statusEl.textContent = "GLBを読み込み中...";
+
+      return new Promise((resolve, reject) => {
+        gltfLoader.load(
+          glbUrl,
+          (gltf) => {
+            clearCurrentObject();
+            currentObject = gltf.scene;
+            fitObjectToView(currentObject);
+            scene.add(currentObject);
+
+            if (fallbackParsed) {
+              labelEl.textContent = `shape: ${fallbackParsed.shape} | color: ${fallbackParsed.colorName} | scale: ${fallbackParsed.scaleName} | source: glb`;
+            } else {
+              labelEl.textContent = "source: glb";
+            }
+
+            statusEl.textContent = "GLBの読み込みが完了しました。";
+            resolve();
+          },
+          undefined,
+          (error) => {
+            if (fallbackParsed) {
+              generateFromParams(fallbackParsed);
+              statusEl.textContent = "GLB読込に失敗したため、パラメータ生成へフォールバックしました。";
+              resolve();
+              return;
+            }
+            reject(error);
+          }
+        );
+      });
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function exportCurrentGlb() {
+      if (!currentObject) {
+        statusEl.textContent = "エクスポート失敗: 先にオブジェクトを生成してください。";
+        return;
+      }
+
+      const exporter = new GLTFExporter();
+      const exportRoot = new THREE.Group();
+      exportRoot.add(currentObject.clone(true));
+
+      exporter.parse(
+        exportRoot,
+        (result) => {
+          if (!(result instanceof ArrayBuffer)) {
+            statusEl.textContent = "エクスポート失敗: GLBバイナリの生成に失敗しました。";
+            return;
+          }
+
+          const blob = new Blob([result], { type: "model/gltf-binary" });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `text-to-3d-${Date.now()}.glb`;
+          anchor.click();
+          URL.revokeObjectURL(url);
+          statusEl.textContent = "GLBを書き出しました。ダウンロードを確認してください。";
+        },
+        (error) => {
+          statusEl.textContent = `エクスポート失敗: ${error}`;
+        },
+        { binary: true }
+      );
+    }
+
+    async function generateViaApi(promptText) {
+      const prompt = promptText.trim();
+      if (!prompt) {
+        statusEl.textContent = "入力エラー: プロンプトを入力してください。";
+        return;
+      }
+
+      statusEl.textContent = "ジョブ登録中...";
+      try {
+        const jobResponse = await fetch("./api/generate-3d.php", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, userId }),
+        });
+
+        if (!jobResponse.ok) {
+          statusEl.textContent = `APIエラー: HTTP ${jobResponse.status}`;
+          return;
+        }
+
+        const jobPayload = await jobResponse.json();
+        if (!jobPayload.success || !jobPayload.job || !jobPayload.job.jobId) {
+          statusEl.textContent = `APIエラー: ${jobPayload.message || "ジョブ作成に失敗しました。"}`;
+          return;
+        }
+
+        const jobId = jobPayload.job.jobId;
+        let completed = false;
+
+        for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+          statusEl.textContent = `AI生成中... (${attempt + 1}/${MAX_POLL_ATTEMPTS})`;
+          await sleep(POLL_INTERVAL_MS);
+
+          const statusResponse = await fetch(`./api/generate-3d-status.php?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(userId)}`);
+          if (!statusResponse.ok) {
+            statusEl.textContent = `ステータス取得エラー: HTTP ${statusResponse.status}`;
+            return;
+          }
+
+          const statusPayload = await statusResponse.json();
+          if (!statusPayload.success || !statusPayload.job) {
+            statusEl.textContent = `ステータス取得エラー: ${statusPayload.message || "不明なエラー"}`;
+            return;
+          }
+
+          if (statusPayload.job.status !== "completed") {
+            continue;
+          }
+
+          completed = true;
+          const result = statusPayload.job.result || {};
+          const parsed = normalizeApiParams(result);
+
+          if (result.glbUrl) {
+            await loadGeneratedGlb(result.glbUrl, parsed);
+          } else {
+            generateFromParams(parsed);
+          }
+
+          await saveHistoryToServer({
+            prompt,
+            mode: "api",
+            jobId,
+            glbUrl: result.glbUrl || "",
+          });
+
+          statusEl.textContent = "API生成完了: 3Dモデルを反映しました。";
+          break;
+        }
+
+        if (!completed) {
+          statusEl.textContent = "API生成タイムアウト: 時間を置いて再試行してください。";
+        }
+      } catch (error) {
+        statusEl.textContent = `API接続エラー: ${error}`;
+      }
     }
 
     function randomPrompt() {
-      const samples = [
-        "赤い立方体を作って",
-        "緑の円柱で少し大きい",
-        "青い金属の球体",
-        "黄色のトーラスを小さめで",
-        "白いマットなコーン",
-      ];
-      promptEl.value = samples[Math.floor(Math.random() * samples.length)];
-      generateFromPrompt(promptEl.value);
+      promptEl.value = PRESET_PROMPTS[Math.floor(Math.random() * PRESET_PROMPTS.length)];
+      generateFromPrompt(promptEl.value, { mode: "random" });
     }
 
     generateBtn.addEventListener("click", () => {
@@ -429,25 +797,36 @@
         statusEl.textContent = "入力エラー: プロンプトを入力してください。";
         return;
       }
-      generateFromPrompt(prompt);
+      generateFromPrompt(prompt, { mode: "local" });
+    });
+
+    apiGenerateBtn.addEventListener("click", () => {
+      generateViaApi(promptEl.value);
     });
 
     randomBtn.addEventListener("click", randomPrompt);
+    exportGlbBtn.addEventListener("click", exportCurrentGlb);
 
     window.addEventListener("resize", resize);
 
     function animate() {
       requestAnimationFrame(animate);
-      if (currentMesh) {
-        currentMesh.rotation.y += 0.006;
+      if (currentObject) {
+        currentObject.rotation.y += 0.006;
       }
       controls.update();
       renderer.render(scene, camera);
     }
 
-    resize();
-    generateFromPrompt(promptEl.value);
-    animate();
+    async function init() {
+      resize();
+      renderPresets();
+      await refreshHistory();
+      generateFromPrompt(promptEl.value, { saveHistory: false });
+      animate();
+    }
+
+    init();
   </script>
 </body>
 </html>
