@@ -5,19 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 ensure_storage_dirs();
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    header('Allow: GET, OPTIONS');
-    http_response_code(204);
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-    json_response([
-        'success' => false,
-        'message' => 'Method Not Allowed. Use GET.',
-    ], 405);
-}
+require_get_or_options();
 
 $jobId = trim((string)($_GET['jobId'] ?? ''));
 $userId = normalize_user_id((string)($_GET['userId'] ?? 'guest'));
@@ -46,19 +34,70 @@ if (($job['userId'] ?? '') !== $userId) {
 }
 
 $now = time();
-$elapsed = $now - (int)($job['createdAt'] ?? $now);
-if (($job['status'] ?? '') === 'queued' && $elapsed >= 1) {
-    $job['status'] = 'processing';
-    $job['updatedAt'] = $now;
-    write_json_file($jobPath, $job);
-}
+$status = (string)($job['status'] ?? 'queued');
 
-if (($job['status'] ?? '') !== 'completed' && $elapsed >= 3) {
-    $prompt = (string)($job['prompt'] ?? '');
-    $job['status'] = 'completed';
-    $job['result'] = parse_prompt_to_params($prompt);
-    $job['updatedAt'] = $now;
-    write_json_file($jobPath, $job);
+if ($status !== 'completed' && $status !== 'failed') {
+    try {
+        $currentProviderTaskId = (string)($job['providerTaskId'] ?? '');
+        if ($currentProviderTaskId === '') {
+            throw new RuntimeException('providerTaskId is missing.');
+        }
+
+        $providerTask = meshy_get_task($currentProviderTaskId);
+        $providerStatus = (string)($providerTask['status'] ?? 'PENDING');
+        $mappedStatus = meshy_map_status($providerStatus);
+
+        $job['updatedAt'] = $now;
+        $job['progress'] = (int)($providerTask['progress'] ?? 0);
+        $job['providerStatus'] = $providerStatus;
+
+        if ($job['stage'] === 'preview' && $providerStatus === 'SUCCEEDED') {
+            $refineTaskId = meshy_create_refine_task(
+                (string)($job['previewTaskId'] ?? $currentProviderTaskId),
+                (string)($job['prompt'] ?? '')
+            );
+            $job['stage'] = 'refine';
+            $job['providerTaskId'] = $refineTaskId;
+            $job['refineTaskId'] = $refineTaskId;
+            $job['status'] = 'processing';
+            $job['providerStatus'] = 'PENDING';
+            $job['progress'] = 0;
+        } elseif ($job['stage'] === 'refine' && $providerStatus === 'SUCCEEDED') {
+            $modelUrls = is_array($providerTask['model_urls'] ?? null) ? $providerTask['model_urls'] : [];
+            $glbUrl = (string)($modelUrls['glb'] ?? '');
+            $thumbnailUrl = (string)($providerTask['thumbnail_url'] ?? '');
+
+            $job['status'] = 'completed';
+            $job['result'] = [
+                'shape' => null,
+                'shapeName' => null,
+                'color' => null,
+                'colorName' => null,
+                'scale' => null,
+                'scaleName' => null,
+                'roughness' => null,
+                'metalness' => null,
+                'glbUrl' => $glbUrl,
+                'previewUrl' => $thumbnailUrl,
+                'thumbnailUrl' => $thumbnailUrl,
+                'title' => (string)($job['title'] ?? normalize_title((string)($job['prompt'] ?? ''))),
+                'providerTaskId' => (string)($job['providerTaskId'] ?? ''),
+            ];
+        } elseif ($mappedStatus === 'failed') {
+            $job['status'] = 'failed';
+            $taskError = is_array($providerTask['task_error'] ?? null) ? $providerTask['task_error'] : [];
+            $job['error'] = (string)($taskError['message'] ?? 'provider task failed');
+        } else {
+            $job['status'] = $mappedStatus;
+        }
+
+        write_json_file($jobPath, $job);
+    } catch (Throwable $e) {
+        $job['status'] = 'failed';
+        $job['updatedAt'] = $now;
+        $job['error'] = $e->getMessage();
+        write_json_file($jobPath, $job);
+    }
 }
 
 json_response([
@@ -66,6 +105,12 @@ json_response([
     'job' => [
         'jobId' => $jobId,
         'status' => $job['status'] ?? 'queued',
+        'stage' => $job['stage'] ?? 'preview',
+        'provider' => $job['provider'] ?? 'meshy',
+        'providerTaskId' => $job['providerTaskId'] ?? '',
+        'progress' => (int)($job['progress'] ?? 0),
+        'error' => $job['error'] ?? '',
+        'title' => $job['title'] ?? normalize_title((string)($job['prompt'] ?? '')),
         'prompt' => $job['prompt'] ?? '',
         'updatedAt' => $job['updatedAt'] ?? $now,
         'result' => $job['result'] ?? null,

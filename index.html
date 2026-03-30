@@ -201,20 +201,21 @@
       list-style: none;
       display: grid;
       gap: 0.42rem;
-      max-height: 156px;
+      max-height: 220px;
       overflow: auto;
     }
 
     .history-item {
       border: 1px solid rgba(11, 27, 47, 0.1);
       border-radius: 12px;
-      padding: 0.5rem 0.6rem;
+      padding: 0.5rem;
       background: rgba(255, 255, 255, 0.8);
       color: var(--ink);
       font-size: 0.82rem;
-      cursor: pointer;
-      text-align: left;
-      font-family: "IBM Plex Mono", monospace;
+      display: grid;
+      grid-template-columns: 48px 1fr auto;
+      gap: 0.55rem;
+      align-items: center;
     }
 
     .history-item:hover {
@@ -222,10 +223,90 @@
       background: rgba(255, 255, 255, 0.96);
     }
 
+    .thumb {
+      width: 48px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 10px;
+      background: linear-gradient(145deg, #d3e7ff, #eef5ff);
+      border: 1px solid rgba(39, 138, 255, 0.2);
+    }
+
+    .history-text {
+      min-width: 0;
+    }
+
+    .history-title {
+      margin: 0;
+      font-size: 0.83rem;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-prompt {
+      margin: 0.1rem 0 0;
+      font-size: 0.73rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .history-actions {
+      display: flex;
+      gap: 0.35rem;
+    }
+
+    .mini-btn {
+      border-radius: 8px;
+      padding: 0.4rem 0.52rem;
+      font-size: 0.7rem;
+      background: rgba(11, 27, 47, 0.08);
+    }
+
+    .mini-btn.delete {
+      background: rgba(255, 77, 94, 0.12);
+      color: #a43a47;
+    }
+
     .history-empty {
       margin: 0;
       color: var(--muted);
       font-size: 0.83rem;
+    }
+
+    .jobs {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.42rem;
+      max-height: 140px;
+      overflow: auto;
+    }
+
+    .job-item {
+      margin: 0;
+      padding: 0.45rem 0.55rem;
+      border-radius: 10px;
+      border: 1px solid rgba(11, 27, 47, 0.1);
+      background: rgba(255, 255, 255, 0.82);
+      font-size: 0.75rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .job-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     button {
@@ -301,6 +382,65 @@
       letter-spacing: 0.02em;
     }
 
+    .mode-toggle {
+      display: flex;
+      gap: 0.6rem;
+    }
+
+    .mode-option {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.88rem;
+      cursor: pointer;
+      padding: 0.4rem 0.7rem;
+      border-radius: 10px;
+      border: 1px solid rgba(39, 138, 255, 0.15);
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .mode-option:has(input:checked) {
+      background: rgba(39, 138, 255, 0.12);
+      border-color: var(--primary);
+      color: var(--primary-dark);
+      font-weight: 700;
+    }
+
+    .mode-option input { display: none; }
+
+    .spinner {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      background: rgba(255,255,255,0.82);
+      backdrop-filter: blur(6px);
+      z-index: 10;
+      border-radius: var(--radius);
+    }
+
+    .spinner-ring {
+      width: 52px;
+      height: 52px;
+      border: 5px solid rgba(39, 138, 255, 0.2);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .spinner-text {
+      font-size: 0.88rem;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", monospace;
+    }
+
     @media (max-width: 900px) {
       .page {
         grid-template-columns: 1fr;
@@ -314,6 +454,14 @@
   </style>
 </head>
 <body>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+      }
+    }
+  </script>
   <main class="page">
     <section class="card panel">
       <div>
@@ -322,19 +470,30 @@
       </div>
 
       <p class="lead">
-        入力したテキストから形状・色・サイズを推定し、右側に3Dプレビューを生成します。
-        まずはUIデモとして、キーワードベースの簡易生成ロジックを入れています。
+        入力したテキストから3Dオブジェクトを生成します。<br>
+        <strong>Local</strong>: キーワードベースの簡易プリミティブ生成。
+        <strong>Shap-E AI</strong>: ローカルAIモデルでメッシュを生成。
       </p>
+
+      <div class="mode-toggle">
+        <label class="mode-option">
+          <input type="radio" name="genMode" value="local" checked />
+          <span>Local (プリミティブ)</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="genMode" value="shap-e" />
+          <span>Shap-E AI</span>
+        </label>
+      </div>
 
       <div class="input-wrap">
         <label for="prompt">プロンプト</label>
         <textarea id="prompt" placeholder="例: 青い金属の球体を作って、少し大きめ">青い金属の球体を作って、少し大きめ</textarea>
-        <p class="hint">キーワード例: 球 / 立方体 / 円柱 / トーラス / 赤 / 青 / 緑 / 小さい / 大きい</p>
+        <p id="hintText" class="hint">キーワード例: 球 / 立方体 / 円柱 / トーラス / 赤 / 青 / 緑 / 小さい / 大きい</p>
       </div>
 
       <div class="controls">
         <button id="generateBtn" class="btn-primary" type="button">Generate 3D</button>
-        <button id="apiGenerateBtn" class="btn-sub" type="button">AIで生成(API)</button>
         <button id="randomBtn" class="btn-sub" type="button">ランダム生成</button>
         <button id="exportGlbBtn" class="btn-sub" type="button">GLBエクスポート</button>
       </div>
@@ -360,22 +519,57 @@
   </main>
 
   <script type="module">
-    import * as THREE from "https://unpkg.com/three@0.165.0/build/three.module.js";
-    import { OrbitControls } from "https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js";
-    import { GLTFLoader } from "https://unpkg.com/three@0.165.0/examples/jsm/loaders/GLTFLoader.js";
-    import { GLTFExporter } from "https://unpkg.com/three@0.165.0/examples/jsm/exporters/GLTFExporter.js";
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
     const promptEl = document.getElementById("prompt");
     const statusEl = document.getElementById("status");
     const labelEl = document.getElementById("sceneLabel");
     const generateBtn = document.getElementById("generateBtn");
-    const apiGenerateBtn = document.getElementById("apiGenerateBtn");
     const randomBtn = document.getElementById("randomBtn");
     const exportGlbBtn = document.getElementById("exportGlbBtn");
     const presetListEl = document.getElementById("presetList");
     const historyListEl = document.getElementById("historyList");
     const historyEmptyEl = document.getElementById("historyEmpty");
+    const hintEl = document.getElementById("hintText");
     const canvas = document.getElementById("scene");
+    const viewerCard = document.querySelector(".viewer");
+
+    const gltfLoader = new GLTFLoader();
+    let isGenerating = false;
+
+    function getSelectedMode() {
+      const checked = document.querySelector('input[name="genMode"]:checked');
+      return checked ? checked.value : "local";
+    }
+
+    // Update hint text when mode changes
+    document.querySelectorAll('input[name="genMode"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        const mode = getSelectedMode();
+        if (mode === "shap-e") {
+          hintEl.textContent = "Shap-Eモード: 任意のテキスト記述で3Dメッシュを生成します（数分かかります）";
+        } else {
+          hintEl.textContent = "キーワード例: 球 / 立方体 / 円柱 / トーラス / 赤 / 青 / 緑 / 小さい / 大きい";
+        }
+      });
+    });
+
+    function showSpinner(message = "Shap-E AI で生成中…") {
+      removeSpinner();
+      const div = document.createElement("div");
+      div.className = "spinner";
+      div.id = "genSpinner";
+      div.innerHTML = `<div class="spinner-ring"></div><p class="spinner-text">${message}</p>`;
+      viewerCard.appendChild(div);
+    }
+
+    function removeSpinner() {
+      const el = document.getElementById("genSpinner");
+      if (el) el.remove();
+    }
 
     const PRESET_PROMPTS = [
       "青い金属の球体を作って、少し大きめ",
@@ -384,11 +578,9 @@
       "黄色のトーラスを小さめで",
       "白いマットなコーン",
     ];
-    const USER_KEY = "text_to_3d_user_id_v1";
-    const MAX_POLL_ATTEMPTS = 25;
-    const POLL_INTERVAL_MS = 1200;
-
-    const userId = getOrCreateUserId();
+    const HISTORY_KEY = "text_to_3d_local_history_v2";
+    const HISTORY_LIMIT = 24;
+    const FALLBACK_THUMBNAIL = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop stop-color='%23d9ebff'/%3E%3Cstop offset='1' stop-color='%23b8d7ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='96' height='96' rx='16' fill='url(%23g)'/%3E%3Cg fill='none' stroke='%23278aff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 63 48 31 75 63Z'/%3E%3Cpath d='M28 63h40'/%3E%3C/g%3E%3C/svg%3E";
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0xd7e9ff, 7, 16);
@@ -405,8 +597,6 @@
     controls.enablePan = false;
     controls.minDistance = 2;
     controls.maxDistance = 8;
-
-    const gltfLoader = new GLTFLoader();
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9db8d3, 1.08);
     scene.add(hemiLight);
@@ -425,26 +615,22 @@
 
     let currentObject = null;
 
-    function getOrCreateUserId() {
-      const existing = localStorage.getItem(USER_KEY);
-      if (existing) return existing;
-
-      const generated = window.crypto && "randomUUID" in window.crypto
-        ? window.crypto.randomUUID()
-        : `guest_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-      localStorage.setItem(USER_KEY, generated);
-      return generated;
+    function deriveTitle(promptText) {
+      const text = String(promptText || "").trim();
+      if (!text) return "Untitled";
+      return text.length > 44 ? `${text.slice(0, 44)}...` : text;
     }
 
-    function normalizeApiParams(apiParams = {}) {
+    function normalizeApiParams(apiParams = {}, prompt = "") {
+      const fallback = parsePrompt(prompt || "");
       return {
-        shape: apiParams.shape || "sphere",
-        color: typeof apiParams.color === "number" ? apiParams.color : 0x278aff,
-        colorName: apiParams.colorName || "blue",
-        scale: typeof apiParams.scale === "number" ? apiParams.scale : 1,
-        scaleName: apiParams.scaleName || "medium",
-        roughness: typeof apiParams.roughness === "number" ? apiParams.roughness : 0.35,
-        metalness: typeof apiParams.metalness === "number" ? apiParams.metalness : 0.35,
+        shape: apiParams.shape || fallback.shape,
+        color: typeof apiParams.color === "number" ? apiParams.color : fallback.color,
+        colorName: apiParams.colorName || fallback.colorName,
+        scale: typeof apiParams.scale === "number" ? apiParams.scale : fallback.scale,
+        scaleName: apiParams.scaleName || fallback.scaleName,
+        roughness: typeof apiParams.roughness === "number" ? apiParams.roughness : fallback.roughness,
+        metalness: typeof apiParams.metalness === "number" ? apiParams.metalness : fallback.metalness,
       };
     }
 
@@ -464,61 +650,124 @@
       currentObject = null;
     }
 
+    function readLocalHistory() {
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function writeLocalHistory(items) {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, HISTORY_LIMIT)));
+    }
+
+    function captureThumbnail() {
+      try {
+        return renderer.domElement.toDataURL("image/png");
+      } catch (error) {
+        return "";
+      }
+    }
+
+    function saveHistoryLocal({ prompt, mode = "local" }) {
+      const clean = String(prompt || "").trim();
+      if (!clean) return;
+
+      const entry = {
+        id: window.crypto && "randomUUID" in window.crypto
+          ? window.crypto.randomUUID()
+          : `hist_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        title: deriveTitle(clean),
+        prompt: clean,
+        mode,
+        thumbnailUrl: captureThumbnail(),
+        createdAt: Date.now(),
+      };
+
+      const current = readLocalHistory();
+      const next = [entry, ...current.filter((item) => item.prompt !== clean)];
+      writeLocalHistory(next);
+      renderHistory(next);
+    }
+
+    function deleteHistoryLocal(historyId) {
+      const current = readLocalHistory();
+      const next = current.filter((item) => item.id !== historyId);
+      writeLocalHistory(next);
+      renderHistory(next);
+    }
+
     function renderHistory(historyItems = []) {
       historyListEl.innerHTML = "";
       historyEmptyEl.style.display = historyItems.length ? "none" : "block";
 
       historyItems.forEach((item) => {
-        const promptText = typeof item === "string" ? item : (item.prompt || "");
+        const promptText = String(item.prompt || "");
         if (!promptText) return;
 
+        const title = item.title || deriveTitle(promptText);
+        const thumbnail = item.thumbnailUrl || item.previewUrl || "";
+
         const li = document.createElement("li");
-        const btn = document.createElement("button");
-        btn.className = "history-item";
-        btn.type = "button";
-        btn.textContent = promptText;
-        btn.addEventListener("click", async () => {
+        li.className = "history-item";
+
+        const img = document.createElement("img");
+        img.className = "thumb";
+        img.alt = title;
+        img.src = thumbnail || FALLBACK_THUMBNAIL;
+        img.onerror = () => {
+          img.onerror = null;
+          img.src = FALLBACK_THUMBNAIL;
+        };
+
+        const textWrap = document.createElement("div");
+        textWrap.className = "history-text";
+        const titleEl = document.createElement("p");
+        titleEl.className = "history-title";
+        titleEl.textContent = title;
+        const promptLine = document.createElement("p");
+        promptLine.className = "history-prompt";
+        promptLine.textContent = promptText;
+        textWrap.appendChild(titleEl);
+        textWrap.appendChild(promptLine);
+
+        const actions = document.createElement("div");
+        actions.className = "history-actions";
+
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "mini-btn";
+        openBtn.textContent = "表示";
+        openBtn.addEventListener("click", () => {
           promptEl.value = promptText;
-          if (item.glbUrl) {
-            await loadGeneratedGlb(item.glbUrl, parsePrompt(promptText));
-            statusEl.textContent = "履歴からGLBを読み込みました。";
-            return;
-          }
           generateFromPrompt(promptText, { saveHistory: false, mode: "history" });
+          statusEl.textContent = "履歴からローカル生成しました。";
         });
-        li.appendChild(btn);
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "mini-btn delete";
+        deleteBtn.textContent = "削除";
+        deleteBtn.addEventListener("click", () => {
+          deleteHistoryLocal(item.id);
+          statusEl.textContent = "履歴を削除しました。";
+        });
+
+        actions.appendChild(openBtn);
+        actions.appendChild(deleteBtn);
+
+        li.appendChild(img);
+        li.appendChild(textWrap);
+        li.appendChild(actions);
         historyListEl.appendChild(li);
       });
     }
 
-    async function fetchHistoryFromServer() {
-      const response = await fetch(`./api/history.php?userId=${encodeURIComponent(userId)}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json();
-      if (!payload.success) throw new Error(payload.message || "履歴取得に失敗しました。");
-      return Array.isArray(payload.items) ? payload.items : [];
-    }
-
-    async function refreshHistory() {
-      try {
-        const items = await fetchHistoryFromServer();
-        renderHistory(items);
-      } catch (error) {
-        historyEmptyEl.style.display = "block";
-        historyEmptyEl.textContent = `履歴取得エラー: ${error}`;
-      }
-    }
-
-    async function saveHistoryToServer({ prompt, mode, jobId = "", glbUrl = "" }) {
-      const response = await fetch("./api/history.php", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, prompt, mode, jobId, glbUrl }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json();
-      if (!payload.success) throw new Error(payload.message || "履歴保存に失敗しました。");
-      renderHistory(Array.isArray(payload.items) ? payload.items : []);
+    function refreshHistory() {
+      renderHistory(readLocalHistory());
     }
 
     function renderPresets() {
@@ -611,9 +860,7 @@
       generateFromParams(parsed);
       statusEl.textContent = `生成完了: ${parsed.shape} を ${parsed.colorName} で作成しました。`;
       if (saveHistory) {
-        saveHistoryToServer({ prompt: promptText, mode }).catch((error) => {
-          statusEl.textContent = `履歴保存エラー: ${error}`;
-        });
+        saveHistoryLocal({ prompt: promptText, mode });
       }
     }
 
@@ -633,45 +880,6 @@
       scene.add(currentObject);
 
       labelEl.textContent = `shape: ${parsed.shape} | color: ${parsed.colorName} | scale: ${parsed.scaleName}`;
-    }
-
-    async function loadGeneratedGlb(glbUrl, fallbackParsed = null) {
-      statusEl.textContent = "GLBを読み込み中...";
-
-      return new Promise((resolve, reject) => {
-        gltfLoader.load(
-          glbUrl,
-          (gltf) => {
-            clearCurrentObject();
-            currentObject = gltf.scene;
-            fitObjectToView(currentObject);
-            scene.add(currentObject);
-
-            if (fallbackParsed) {
-              labelEl.textContent = `shape: ${fallbackParsed.shape} | color: ${fallbackParsed.colorName} | scale: ${fallbackParsed.scaleName} | source: glb`;
-            } else {
-              labelEl.textContent = "source: glb";
-            }
-
-            statusEl.textContent = "GLBの読み込みが完了しました。";
-            resolve();
-          },
-          undefined,
-          (error) => {
-            if (fallbackParsed) {
-              generateFromParams(fallbackParsed);
-              statusEl.textContent = "GLB読込に失敗したため、パラメータ生成へフォールバックしました。";
-              resolve();
-              return;
-            }
-            reject(error);
-          }
-        );
-      });
-    }
-
-    function sleep(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     function exportCurrentGlb() {
@@ -708,87 +916,71 @@
       );
     }
 
-    async function generateViaApi(promptText) {
-      const prompt = promptText.trim();
-      if (!prompt) {
-        statusEl.textContent = "入力エラー: プロンプトを入力してください。";
-        return;
-      }
-
-      statusEl.textContent = "ジョブ登録中...";
-      try {
-        const jobResponse = await fetch("./api/generate-3d.php", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, userId }),
-        });
-
-        if (!jobResponse.ok) {
-          statusEl.textContent = `APIエラー: HTTP ${jobResponse.status}`;
-          return;
-        }
-
-        const jobPayload = await jobResponse.json();
-        if (!jobPayload.success || !jobPayload.job || !jobPayload.job.jobId) {
-          statusEl.textContent = `APIエラー: ${jobPayload.message || "ジョブ作成に失敗しました。"}`;
-          return;
-        }
-
-        const jobId = jobPayload.job.jobId;
-        let completed = false;
-
-        for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
-          statusEl.textContent = `AI生成中... (${attempt + 1}/${MAX_POLL_ATTEMPTS})`;
-          await sleep(POLL_INTERVAL_MS);
-
-          const statusResponse = await fetch(`./api/generate-3d-status.php?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(userId)}`);
-          if (!statusResponse.ok) {
-            statusEl.textContent = `ステータス取得エラー: HTTP ${statusResponse.status}`;
-            return;
-          }
-
-          const statusPayload = await statusResponse.json();
-          if (!statusPayload.success || !statusPayload.job) {
-            statusEl.textContent = `ステータス取得エラー: ${statusPayload.message || "不明なエラー"}`;
-            return;
-          }
-
-          if (statusPayload.job.status !== "completed") {
-            continue;
-          }
-
-          completed = true;
-          const result = statusPayload.job.result || {};
-          const parsed = normalizeApiParams(result);
-
-          if (result.glbUrl) {
-            await loadGeneratedGlb(result.glbUrl, parsed);
-          } else {
-            generateFromParams(parsed);
-          }
-
-          await saveHistoryToServer({
-            prompt,
-            mode: "api",
-            jobId,
-            glbUrl: result.glbUrl || "",
-          });
-
-          statusEl.textContent = "API生成完了: 3Dモデルを反映しました。";
-          break;
-        }
-
-        if (!completed) {
-          statusEl.textContent = "API生成タイムアウト: 時間を置いて再試行してください。";
-        }
-      } catch (error) {
-        statusEl.textContent = `API接続エラー: ${error}`;
-      }
-    }
-
     function randomPrompt() {
       promptEl.value = PRESET_PROMPTS[Math.floor(Math.random() * PRESET_PROMPTS.length)];
       generateFromPrompt(promptEl.value, { mode: "random" });
+    }
+
+    async function generateWithShapE(promptText) {
+      if (isGenerating) return;
+      isGenerating = true;
+      generateBtn.disabled = true;
+      generateBtn.textContent = "生成中…";
+      showSpinner("Shap-E AI で生成中… (初回はモデルDLのため時間がかかります)");
+      statusEl.textContent = "Shap-E AI で生成中… しばらくお待ちください。";
+
+      try {
+        const res = await fetch("./api/generate-3d-local.php", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: promptText, userId: "local-user" }),
+        });
+
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const errJson = await res.json();
+            msg = errJson.message || errJson.detail || msg;
+          } catch (_e) { /* ignore */ }
+          throw new Error(msg);
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const genTime = res.headers.get("X-Generation-Time") || "?";
+
+        await loadGlbFromUrl(url);
+        URL.revokeObjectURL(url);
+
+        labelEl.textContent = `Shap-E AI | prompt: ${promptText.slice(0, 40)}`;
+        statusEl.textContent = `Shap-E 生成完了 (${genTime}s)`;
+        saveHistoryLocal({ prompt: promptText, mode: "shap-e" });
+      } catch (err) {
+        statusEl.textContent = `Shap-E 生成失敗: ${err.message}`;
+      } finally {
+        isGenerating = false;
+        generateBtn.disabled = false;
+        generateBtn.textContent = "Generate 3D";
+        removeSpinner();
+      }
+    }
+
+    function loadGlbFromUrl(url) {
+      return new Promise((resolve, reject) => {
+        gltfLoader.load(
+          url,
+          (gltf) => {
+            clearCurrentObject();
+            const model = gltf.scene;
+            fitObjectToView(model);
+            scene.add(model);
+            currentObject = model;
+            resolve();
+          },
+          undefined,
+          (err) => reject(new Error("GLB読み込み失敗: " + (err.message || err)))
+        );
+      });
     }
 
     generateBtn.addEventListener("click", () => {
@@ -797,11 +989,12 @@
         statusEl.textContent = "入力エラー: プロンプトを入力してください。";
         return;
       }
-      generateFromPrompt(prompt, { mode: "local" });
-    });
-
-    apiGenerateBtn.addEventListener("click", () => {
-      generateViaApi(promptEl.value);
+      const mode = getSelectedMode();
+      if (mode === "shap-e") {
+        generateWithShapE(prompt);
+      } else {
+        generateFromPrompt(prompt, { mode: "local" });
+      }
     });
 
     randomBtn.addEventListener("click", randomPrompt);
@@ -818,15 +1011,38 @@
       renderer.render(scene, camera);
     }
 
-    async function init() {
+    function init() {
       resize();
       renderPresets();
-      await refreshHistory();
+      refreshHistory();
       generateFromPrompt(promptEl.value, { saveHistory: false });
       animate();
     }
 
     init();
+  </script>
+  <script>
+    // モジュールロード失敗時のフォールバック検知
+    window.addEventListener("DOMContentLoaded", () => {
+      setTimeout(() => {
+        const canvas = document.getElementById("scene");
+        const status = document.getElementById("status");
+        if (canvas && canvas.getContext("webgl2") === null && canvas.getContext("webgl") === null) {
+          status.textContent = "エラー: WebGLがサポートされていません。ブラウザを確認してください。";
+          status.style.background = "rgba(255,77,94,0.12)";
+          status.style.color = "#a43a47";
+          status.style.borderColor = "rgba(255,77,94,0.3)";
+        }
+      }, 3000);
+    });
+    window.addEventListener("error", (e) => {
+      const status = document.getElementById("status");
+      if (status) {
+        status.textContent = "JSエラー: " + (e.message || e);
+        status.style.background = "rgba(255,77,94,0.12)";
+        status.style.color = "#a43a47";
+      }
+    });
   </script>
 </body>
 </html>
